@@ -286,7 +286,7 @@ def process_capture_result(analysis: Dict[str, Any], source_type: str) -> Dict[s
                     if log_db_id:
                         log_data = {
                             "action": f"FAILED: {title}",
-                            "timestamp": datetime.now().astimezone().isoformat()[:19],
+                            "timestamp": datetime.now().astimezone().isoformat(),
                             "result": "Failed",
                             "database": "None (no match)",
                             "details": failure_details
@@ -376,7 +376,7 @@ def process_capture_result(analysis: Dict[str, Any], source_type: str) -> Dict[s
                         if log_db_id:
                             log_data = {
                                 "action": f"Created: {title}",
-                                "timestamp": datetime.now().astimezone().isoformat()[:19],
+                                "timestamp": datetime.now().astimezone().isoformat(),
                                 "result": "Success",
                                 "database": db_title,
                                 "details": log_details
@@ -400,7 +400,7 @@ def process_capture_result(analysis: Dict[str, Any], source_type: str) -> Dict[s
                         if log_db_id:
                             log_data = {
                                 "action": f"FAILED: {title}",
-                                "timestamp": datetime.now().astimezone().isoformat()[:19],
+                                "timestamp": datetime.now().astimezone().isoformat(),
                                 "result": "Failed",
                                 "database": db_title,
                                 "details": failure_details

@@ -45,7 +45,7 @@ notion-capture/
 │   ├── GOOGLE_SETUP.md  # Google OAuth setup guide
 │   └── NOTION_SETUP.md  # Notion OAuth setup guide
 └── mac/                 # macOS SwiftUI application
-    └── ScreenSnapAI/    # Xcode project
+    └── notion-capture/  # Xcode project
 ```
 
 ## Prerequisites
@@ -61,9 +61,11 @@ notion-capture/
 
 ### Backend Setup
 
-1. **Install dependencies:**
+1. **Create virtual environment and install dependencies:**
    ```bash
    cd backend
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements.txt
    ```
 
@@ -91,6 +93,7 @@ notion-capture/
 6. **Start the backend server:**
    ```bash
    cd backend
+   source .venv/bin/activate  # If not already activated
    uvicorn main:app --reload
    ```
    The server will run on `http://localhost:8000`
@@ -99,7 +102,7 @@ notion-capture/
 
 1. **Open the project in Xcode:**
    ```bash
-   open mac/ScreenSnapAI/notion-capture.xcodeproj
+   open mac/notion-capture/notion-capture.xcodeproj
    ```
 
 2. **Build and run:**
