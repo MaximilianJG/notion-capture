@@ -1,0 +1,46 @@
+Analyze this screenshot and extract structured information.
+
+CURRENT DATE/TIME (Local Timezone):
+- Now: {datetime_formatted}
+- ISO: {datetime_iso}
+- Timezone: {timezone} ({timezone_offset})
+
+OCR EXTRACTED TEXT:
+{ocr_text}
+
+INSTRUCTIONS:
+Analyze and determine if this is:
+1. An EVENT - Something with a date/time for a calendar
+2. SOMETHING ELSE - Any other content for Notion
+
+Provide a DETAILED ANALYSIS explaining what this input represents, its context, and meaning.
+
+RESPOND WITH JSON ONLY:
+
+For EVENTS:
+{{
+    "category": "event",
+    "confidence": 0.0-1.0,
+    "title": "event title",
+    "description": "event description",
+    "detailed_analysis": "In-depth explanation",
+    "start_time": "ISO 8601 local datetime",
+    "end_time": "ISO 8601 local datetime or null",
+    "location": "location or null",
+    "extracted_fields": {{...}}
+}}
+
+For OTHER:
+{{
+    "category": "other",
+    "confidence": 0.0-1.0,
+    "title": "descriptive title",
+    "description": "brief description",
+    "detailed_analysis": "In-depth explanation",
+    "content": "main content",
+    "content_type": "movie|book|task|note|recipe|article|music|contact|other",
+    "extracted_fields": {{...}}
+}}
+
+Return ONLY valid JSON.
+

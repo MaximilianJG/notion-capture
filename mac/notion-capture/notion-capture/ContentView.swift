@@ -2,12 +2,14 @@
 //  ContentView.swift
 //  Notion Capture
 //
-//  Slim single-purpose capture flow
-//  Events → Google Calendar, Everything else → Notion
+//  Stateless backend with BYOC (Bring Your Own Credentials)
+//  Frontend stores credentials locally and sends them with each request
 //
 
 import SwiftUI
 import AppKit
+import Security
+import Combine
 
 enum TabSelection: Hashable {
     case home
@@ -45,8 +47,80 @@ struct CaptureResult: Identifiable {
     let timestamp: Date
 }
 
+// MARK: - Credential Storage
+class CredentialStore: ObservableObject {
+    static let shared = CredentialStore()
+    
+    @Published var notionApiKey: String = ""
+    @Published var notionSelectedPageId: String = ""
+    @Published var googleTokens: [String: Any]? = nil
+    
+    private let notionKeyKey = "notion_api_key"
+    private let notionPageIdKey = "notion_selected_page_id"
+    private let googleTokensKey = "google_tokens"
+    
+    init() {
+        loadCredentials()
+    }
+    
+    func loadCredentials() {
+        notionApiKey = UserDefaults.standard.string(forKey: notionKeyKey) ?? ""
+        notionSelectedPageId = UserDefaults.standard.string(forKey: notionPageIdKey) ?? ""
+        
+        if let data = UserDefaults.standard.data(forKey: googleTokensKey),
+           let tokens = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            googleTokens = tokens
+        }
+    }
+    
+    func saveNotionCredentials(apiKey: String, pageId: String = "") {
+        notionApiKey = apiKey
+        notionSelectedPageId = pageId
+        UserDefaults.standard.set(apiKey, forKey: notionKeyKey)
+        UserDefaults.standard.set(pageId, forKey: notionPageIdKey)
+    }
+    
+    func saveGoogleTokens(_ tokens: [String: Any]) {
+        googleTokens = tokens
+        if let data = try? JSONSerialization.data(withJSONObject: tokens) {
+            UserDefaults.standard.set(data, forKey: googleTokensKey)
+        }
+    }
+    
+    func clearGoogleTokens() {
+        googleTokens = nil
+        UserDefaults.standard.removeObject(forKey: googleTokensKey)
+    }
+    
+    func clearNotionCredentials() {
+        notionApiKey = ""
+        notionSelectedPageId = ""
+        UserDefaults.standard.removeObject(forKey: notionKeyKey)
+        UserDefaults.standard.removeObject(forKey: notionPageIdKey)
+    }
+    
+    var googleTokensJSON: String? {
+        guard let tokens = googleTokens,
+              let data = try? JSONSerialization.data(withJSONObject: tokens),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+    
+    var hasNotionCredentials: Bool {
+        !notionApiKey.isEmpty
+    }
+    
+    var hasGoogleCredentials: Bool {
+        googleTokens != nil && (googleTokens?["access_token"] as? String) != nil
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var screenshotTrigger: ScreenshotTrigger
+    @StateObject private var credentials = CredentialStore.shared
+    
     @State private var statusMessage: String = "Ready"
     @State private var googleConnected: Bool = false
     @State private var googleEmail: String? = nil
@@ -62,6 +136,10 @@ struct ContentView: View {
     @State private var isProcessingText: Bool = false
     @State private var isHoveringSendText: Bool = false
     
+    // Notion API key input
+    @State private var notionApiKeyInput: String = ""
+    @State private var showNotionSetup: Bool = false
+    
     // Recent captures (in-memory only)
     @State private var recentCaptures: [CaptureResult] = []
     @State private var showResultPopup: Bool = false
@@ -69,6 +147,10 @@ struct ContentView: View {
     
     // Notion databases
     @State private var notionDatabases: [[String: Any]] = []
+    @State private var showDatabasesDropdown: Bool = false
+    
+    // Backend URL
+    private let backendURL = "http://127.0.0.1:8000"
 
     var body: some View {
         ZStack {
@@ -94,6 +176,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            notionApiKeyInput = credentials.notionApiKey
             checkGoogleStatus()
             checkNotionStatus()
             
@@ -143,10 +226,44 @@ struct ContentView: View {
                     }
                 }
             }
+            
+            // Listen for screenshot upload to handle response
+            NotificationCenter.default.addObserver(
+                forName: .screenshotUploaded,
+                object: nil,
+                queue: .main
+            ) { notification in
+                if let data = notification.userInfo?["responseData"] as? Data {
+                    handleCaptureResponse(data: data)
+                }
+            }
+            
+            // Listen for Google tokens received via URL scheme
+            NotificationCenter.default.addObserver(
+                forName: .googleTokensReceived,
+                object: nil,
+                queue: .main
+            ) { notification in
+                self.isPollingGoogleStatus = false
+                self.statusMessage = "Google Calendar connected!"
+                self.checkGoogleStatus()
+            }
+            
+            // Listen for Google auth errors
+            NotificationCenter.default.addObserver(
+                forName: .googleAuthError,
+                object: nil,
+                queue: .main
+            ) { notification in
+                self.isPollingGoogleStatus = false
+                if let error = notification.object as? String {
+                    self.statusMessage = "Google auth error: \(error)"
+                }
+            }
         }
         .onChange(of: screenshotTrigger.shouldTakeScreenshot) { _, newValue in
             if newValue {
-                ScreenshotManager.shared.takeScreenshot()
+                ScreenshotManager.shared.takeScreenshot(credentials: credentials)
             }
         }
     }
@@ -154,16 +271,13 @@ struct ContentView: View {
     // MARK: - Result Popup
     private func resultPopupView(result: CaptureResult) -> some View {
         ZStack {
-            // Dimmed background
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
                 .onTapGesture {
                     withAnimation { showResultPopup = false }
                 }
             
-            // Popup card
             VStack(alignment: .leading, spacing: 16) {
-                // Header
                 HStack {
                     Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundColor(result.success ? .green : .red)
@@ -188,7 +302,6 @@ struct ContentView: View {
                 
                 Divider()
                 
-                // Destination
                 HStack {
                     Text("Destination:")
                         .fontWeight(.medium)
@@ -197,7 +310,6 @@ struct ContentView: View {
                 }
                 
                 if let summary = result.summary {
-                    // Database (for Notion)
                     if let database = summary.database {
                         HStack {
                             Text("Database:")
@@ -206,7 +318,6 @@ struct ContentView: View {
                         }
                     }
                     
-                    // Filled from user
                     if let filled = summary.filledFromUser, !filled.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Filled from your input:")
@@ -221,7 +332,6 @@ struct ContentView: View {
                         }
                     }
                     
-                    // Filled by AI
                     if let aiFilledArray = summary.filledByAi, !aiFilledArray.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Filled by AI research:")
@@ -236,7 +346,6 @@ struct ContentView: View {
                         }
                     }
                     
-                    // Left empty
                     if let empty = summary.leftEmpty, !empty.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Left empty:")
@@ -252,7 +361,6 @@ struct ContentView: View {
                     }
                 }
                 
-                // Error message
                 if let error = result.error {
                     Text(error)
                         .font(.caption)
@@ -262,7 +370,6 @@ struct ContentView: View {
                         .cornerRadius(6)
                 }
                 
-                // Link button
                 if let link = result.link, let url = URL(string: link) {
                     Link(destination: url) {
                         HStack {
@@ -288,7 +395,6 @@ struct ContentView: View {
     // MARK: - Tab Bar
     private var tabBar: some View {
         VStack(spacing: 0) {
-            // Tab buttons
             HStack(spacing: 0) {
                 Spacer()
                 
@@ -341,22 +447,20 @@ struct ContentView: View {
             
             // Connection Status Bar
             HStack(spacing: 16) {
-                // Google Status
                 HStack(spacing: 6) {
                     Image(systemName: googleConnected ? "checkmark.circle.fill" : "xmark.circle")
                         .foregroundColor(googleConnected ? .green : .gray)
                         .font(.system(size: 12))
-                    Text(googleConnected ? (googleEmail ?? "Google") : "Google")
+                    Text("Google")
                         .font(.system(size: 11))
                         .foregroundColor(googleConnected ? .primary : .secondary)
                 }
                 
-                // Notion Status
                 HStack(spacing: 6) {
                     Image(systemName: notionConnected ? "checkmark.circle.fill" : "xmark.circle")
                         .foregroundColor(notionConnected ? .green : .gray)
                         .font(.system(size: 12))
-                    Text(notionConnected ? (notionWorkspace ?? "Notion") : "Notion")
+                    Text("Notion")
                         .font(.system(size: 11))
                         .foregroundColor(notionConnected ? .primary : .secondary)
                 }
@@ -377,25 +481,21 @@ struct ContentView: View {
     // MARK: - Home Tab
     private var homeTabView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Top section with status and controls
             VStack(spacing: 12) {
-                // Status message
                 Text(statusMessage)
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                 
-                // Screenshot button
                 Button("Take Screenshot") {
-                    ScreenshotManager.shared.takeScreenshot()
+                    ScreenshotManager.shared.takeScreenshot(credentials: credentials)
                 }
                 .buttonStyle(.borderedProminent)
                 .scaleEffect(isHoveringScreenshot ? 1.03 : 1.0)
                 .animation(.easeInOut(duration: 0.1), value: isHoveringScreenshot)
                 .onHover { hovering in isHoveringScreenshot = hovering }
                 
-                // Text input section
                 HStack(spacing: 8) {
                     TextField("Type something to capture...", text: $textInput)
                         .textFieldStyle(.plain)
@@ -441,7 +541,6 @@ struct ContentView: View {
             
             Divider()
             
-            // Recent captures list
             VStack(spacing: 0) {
                 if !recentCaptures.isEmpty {
                     ScrollView {
@@ -490,7 +589,6 @@ struct CaptureRowView: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Icon
             Image(systemName: capture.category == "event" ? "calendar" : "doc.text")
                 .font(.system(size: 16))
                 .foregroundColor(capture.success ? (capture.category == "event" ? .blue : .purple) : .red)
@@ -521,7 +619,6 @@ struct CaptureRowView: View {
             
             Spacer()
             
-            // Status indicator & click hint on hover
             HStack(spacing: 6) {
                 if isHovered {
                     Text("Click for details")
@@ -569,7 +666,7 @@ extension ContentView {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text(googleEmail ?? "Connected")
+                            Text("Connected")
                                 .foregroundColor(.primary)
                             Spacer()
                             Button("Disconnect") {
@@ -604,55 +701,87 @@ extension ContentView {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text(notionWorkspace ?? "Connected")
+                            Text("Connected")
                                 .foregroundColor(.primary)
+                            Spacer()
+                            Button("Disconnect") {
+                                credentials.clearNotionCredentials()
+                                notionConnected = false
+                                notionWorkspace = nil
+                                notionApiKeyInput = ""
+                                showDatabasesDropdown = false
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
                         .padding(12)
                         .background(Color.green.opacity(0.1))
                         .cornerRadius(8)
                         
-                        // Show databases info
                         if !notionDatabases.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Available Databases:")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Button(action: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showDatabasesDropdown.toggle()
+                                    }
+                                }) {
+                                    HStack {
+                                        Image(systemName: "tablecells")
+                                            .foregroundColor(.purple)
+                                        Text("Available Databases (\(notionDatabases.count))")
+                                            .font(.subheadline)
+                                        Spacer()
+                                        Image(systemName: showDatabasesDropdown ? "chevron.up" : "chevron.down")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(10)
+                                    .background(Color(NSColor.controlBackgroundColor))
+                                    .cornerRadius(showDatabasesDropdown ? 8 : 8)
+                                }
+                                .buttonStyle(.plain)
                                 
-                                ForEach(Array(notionDatabases.prefix(5).enumerated()), id: \.offset) { _, db in
-                                    if let title = db["title"] as? String {
-                                        HStack {
-                                            Image(systemName: "tablecells")
-                                                .foregroundColor(.purple)
-                                            Text(title)
-                                                .font(.caption)
+                                if showDatabasesDropdown {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(Array(notionDatabases.enumerated()), id: \.offset) { _, db in
+                                            if let title = db["title"] as? String {
+                                                HStack {
+                                                    Image(systemName: "doc.text")
+                                                        .foregroundColor(.purple.opacity(0.7))
+                                                        .font(.caption)
+                                                    Text(title)
+                                                        .font(.caption)
+                                                        .foregroundColor(.primary)
+                                                }
+                                            }
                                         }
                                     }
-                                }
-                                
-                                if notionDatabases.count > 5 {
-                                    Text("+ \(notionDatabases.count - 5) more...")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                                    .cornerRadius(8)
+                                    .padding(.top, 4)
                                 }
                             }
-                            .padding(10)
-                            .background(Color(NSColor.controlBackgroundColor))
-                            .cornerRadius(8)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: "xmark.circle")
-                                    .foregroundColor(.orange)
-                                Text("Not Connected")
-                                    .foregroundColor(.primary)
-                            }
-                            
-                            Text("Set NOTION_API_KEY in the backend .env file")
+                            Text("Enter your Notion Internal Integration API Key:")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             
-                            Text("See backend/NOTION_SETUP.md for instructions")
+                            HStack {
+                                SecureField("secret_xxx...", text: $notionApiKeyInput)
+                                    .textFieldStyle(.roundedBorder)
+                                
+                                Button("Connect") {
+                                    saveNotionApiKey()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(notionApiKeyInput.isEmpty)
+                            }
+                            
+                            Text("Get your API key from notion.so/my-integrations")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -706,17 +835,30 @@ extension ContentView {
     
     // MARK: - API Functions
     
+    private func saveNotionApiKey() {
+        credentials.saveNotionCredentials(apiKey: notionApiKeyInput)
+        checkNotionStatus()
+    }
+    
     private func checkGoogleStatus(continuePolling: Bool = false) {
-        guard let url = URL(string: "http://127.0.0.1:8000/google/auth/status") else { return }
+        guard credentials.hasGoogleCredentials else {
+            googleConnected = false
+            googleEmail = nil
+            return
+        }
         
-        URLSession.shared.dataTask(with: URLRequest(url: url)) { data, response, error in
+        guard let url = URL(string: "\(backendURL)/google/auth/status") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        if let tokensData = try? JSONSerialization.data(withJSONObject: credentials.googleTokens ?? [:]) {
+            request.httpBody = tokensData
+        }
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
-                if let error = error {
-                    self.statusMessage = "Error: \(error.localizedDescription)"
-                    self.isPollingGoogleStatus = false
-                    return
-                }
-                
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     let wasConnected = self.googleConnected
@@ -739,9 +881,18 @@ extension ContentView {
     }
     
     private func checkNotionStatus() {
-        guard let url = URL(string: "http://127.0.0.1:8000/notion/auth/status") else { return }
+        guard credentials.hasNotionCredentials else {
+            notionConnected = false
+            notionWorkspace = nil
+            return
+        }
         
-        URLSession.shared.dataTask(with: URLRequest(url: url)) { data, response, error in
+        guard let url = URL(string: "\(backendURL)/notion/auth/status") else { return }
+        
+        var request = URLRequest(url: url)
+        request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -759,7 +910,7 @@ extension ContentView {
     private func connectGoogle() {
         statusMessage = "Connecting to Google…"
         
-        guard let url = URL(string: "http://127.0.0.1:8000/google/auth/url") else {
+        guard let url = URL(string: "\(backendURL)/google/auth/url") else {
             statusMessage = "Bad URL"
             return
         }
@@ -780,16 +931,17 @@ extension ContentView {
                 }
                 
                 if NSWorkspace.shared.open(authUrl) {
-                    self.statusMessage = "Complete authentication in browser"
+                    self.statusMessage = "Complete authentication in browser…"
                     self.isPollingGoogleStatus = true
                     
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    // Poll for status updates
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                         if self.isPollingGoogleStatus {
                             self.checkGoogleStatus(continuePolling: true)
                         }
                     }
                     
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
                         self.isPollingGoogleStatus = false
                     }
                 }
@@ -800,28 +952,20 @@ extension ContentView {
     private func logoutGoogle() {
         statusMessage = "Disconnecting Google…"
         isPollingGoogleStatus = false
-        
-        guard let url = URL(string: "http://127.0.0.1:8000/google/auth/logout") else { return }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        
-        URLSession.shared.dataTask(with: request) { _, response, _ in
-            DispatchQueue.main.async {
-                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                if status == 200 {
-                    self.googleConnected = false
-                    self.googleEmail = nil
-                    self.statusMessage = "Google disconnected"
-                }
-            }
-        }.resume()
+        credentials.clearGoogleTokens()
+        googleConnected = false
+        googleEmail = nil
+        statusMessage = "Google disconnected"
     }
     
     private func fetchNotionDatabases() {
-        guard let url = URL(string: "http://127.0.0.1:8000/notion/databases") else { return }
+        guard credentials.hasNotionCredentials else { return }
+        guard let url = URL(string: "\(backendURL)/notion/databases") else { return }
         
-        URLSession.shared.dataTask(with: URLRequest(url: url)) { data, _, _ in
+        var request = URLRequest(url: url)
+        request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+        
+        URLSession.shared.dataTask(with: request) { data, _, _ in
             DispatchQueue.main.async {
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -841,7 +985,7 @@ extension ContentView {
         let textToSend = textInput
         textInput = ""
         
-        guard let url = URL(string: "http://127.0.0.1:8000/process-text") else {
+        guard let url = URL(string: "\(backendURL)/process-text") else {
             statusMessage = "Bad URL"
             isProcessingText = false
             return
@@ -850,6 +994,16 @@ extension ContentView {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        // Add credentials to headers
+        if credentials.hasNotionCredentials {
+            request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+            request.setValue(credentials.notionSelectedPageId, forHTTPHeaderField: "X-Notion-Page-Id")
+        }
+        if let googleTokensJSON = credentials.googleTokensJSON {
+            request.setValue(googleTokensJSON, forHTTPHeaderField: "X-Google-Tokens")
+        }
+        
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["text": textToSend])
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -873,7 +1027,7 @@ extension ContentView {
             return
         }
         
-        // Update connection status
+        // Update connection status from response
         if let googleStatus = json["google_status"] as? [String: Any] {
             googleConnected = googleStatus["connected"] as? Bool ?? false
             googleEmail = googleStatus["email"] as? String
@@ -883,11 +1037,9 @@ extension ContentView {
             notionWorkspace = notionStatus["workspace_name"] as? String
         }
         
-        // Parse result
         let title = json["title"] as? String ?? "Untitled"
         let category = json["category"] as? String ?? "other"
         
-        // Determine success and destination
         var success = false
         var destination = "Unknown"
         var link: String? = nil
@@ -910,7 +1062,6 @@ extension ContentView {
             error = json["notion_error"] as? String
         }
         
-        // Parse summary
         if let summaryDict = json["summary"] as? [String: Any] {
             let decoder = JSONDecoder()
             if let summaryData = try? JSONSerialization.data(withJSONObject: summaryDict),
@@ -919,7 +1070,6 @@ extension ContentView {
             }
         }
         
-        // Create result
         let result = CaptureResult(
             title: title,
             category: category,
@@ -931,13 +1081,10 @@ extension ContentView {
             timestamp: Date()
         )
         
-        // Add to recent captures
         recentCaptures.insert(result, at: 0)
         if recentCaptures.count > 20 {
             recentCaptures.removeLast()
         }
-        
-        // Don't auto-show popup - user can click on log item to see details
         
         statusMessage = success ? "\(category == "event" ? "Event" : "Item") created" : "Failed: \(error ?? "Unknown error")"
     }
@@ -945,7 +1092,7 @@ extension ContentView {
     private func healthCheck() {
         statusMessage = "Checking health…"
         
-        guard let url = URL(string: "http://127.0.0.1:8000/health") else { return }
+        guard let url = URL(string: "\(backendURL)/health") else { return }
         
         URLSession.shared.dataTask(with: URLRequest(url: url)) { _, response, error in
             DispatchQueue.main.async {
@@ -960,12 +1107,20 @@ extension ContentView {
     }
     
     private func testCalendar() {
+        guard credentials.hasGoogleCredentials else {
+            statusMessage = "Connect Google Calendar first"
+            return
+        }
+        
         statusMessage = "Creating test event…"
         
-        guard let url = URL(string: "http://127.0.0.1:8000/google/test-event") else { return }
+        guard let url = URL(string: "\(backendURL)/google/test-event") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        if let googleTokensJSON = credentials.googleTokensJSON {
+            request.setValue(googleTokensJSON, forHTTPHeaderField: "X-Google-Tokens")
+        }
         
         URLSession.shared.dataTask(with: request) { data, _, error in
             DispatchQueue.main.async {

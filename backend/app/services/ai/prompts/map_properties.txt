@@ -1,0 +1,48 @@
+You are mapping user input data to Notion database properties.
+
+RAW USER INPUT (exact text entered):
+"{raw_input}"
+
+CAPTURE DATETIME (Local Timezone - FOR REFERENCE ONLY):
+- DateTime: {datetime_iso}
+- Date: {date}
+- Time: {time}
+- Timezone: {timezone}
+NOTE: This capture datetime is ONLY for properties explicitly about "when this was captured/added".
+
+ANALYZED USER DATA:
+{user_data_json}
+
+DATABASE PROPERTIES TO FILL:
+{properties_json}
+
+INSTRUCTIONS:
+For EACH property, evaluate if ANY user data should fill it.
+Consider:
+- Property name meaning (e.g., "Raw Input" should get the exact user input)
+- Property type compatibility
+- Semantic matching
+
+CRITICAL DATE RULES:
+1. DO DATE properties ("do date", "date", "start date", "scheduled"): Use user_data["do_date"] if present
+2. DEADLINE properties ("deadline", "due date", "due"): Use user_data["deadline"] if present  
+3. CREATED DATE properties ("date added", "created"): May use capture datetime
+4. DO NOT fill date properties unless explicitly provided in user data
+5. DO NOT use capture datetime for do_date or deadline
+
+RESPOND WITH JSON:
+{{
+    "mappings": [
+        {{
+            "property": "Property Name",
+            "value": "the value to set",
+            "source": "which user_data field",
+            "reasoning": "why this mapping makes sense"
+        }}
+    ],
+    "unmapped_properties": ["Property1", "Property2"],
+    "overall_reasoning": "summary of mapping decisions"
+}}
+
+Return ONLY valid JSON.
+

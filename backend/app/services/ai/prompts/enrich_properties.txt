@@ -1,0 +1,37 @@
+Research and fill the following properties based on the user's input.
+
+USER INPUT:
+"{raw_input}"
+
+CONTENT:
+- Title: {title}
+- Type: {content_type}
+- Analysis: {detailed_analysis}
+
+CURRENT DATE: {date}
+
+PROPERTIES TO RESEARCH AND FILL:
+{properties_json}
+
+INSTRUCTIONS:
+1. Research each property based on the content (e.g., for a movie, look up director, year, etc.)
+2. For select types, use one of the provided options if available
+3. For dates, use ISO format (YYYY-MM-DD)
+4. Only provide values you're confident about
+5. Set to null if you cannot determine the value
+
+DATE RULES:
+- FACTUAL dates CAN be researched: release year, publication date, etc.
+- USER-SPECIFIC dates should NOT be filled: deadline, due date, do date
+- NEVER infer one date from another
+
+RESPOND WITH JSON:
+{{
+    "property_name_1": "value",
+    "property_name_2": 123,
+    "property_name_3": null,
+    ...
+}}
+
+Return ONLY valid JSON with property names as keys.
+

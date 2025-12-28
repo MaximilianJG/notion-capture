@@ -1,0 +1,30 @@
+Select the most appropriate Notion database for this content.
+
+RAW USER INPUT:
+"{raw_input}"
+
+ANALYZED CONTENT:
+- Title: {title}
+- Description: {description}
+- Type: {content_type}
+- Detailed Analysis: {detailed_analysis}
+
+AVAILABLE DATABASES:
+{databases_json}
+
+INSTRUCTIONS:
+1. Analyze if ANY database is a good semantic fit
+2. Consider: database title, property names matching the content
+3. Be STRICT - if no database truly fits, say so
+4. Consider the content type and what kind of database it belongs in
+
+RESPOND WITH JSON:
+{{
+    "found_match": true/false,
+    "selected_index": <number or null>,
+    "confidence": 0.0-1.0,
+    "reason": "detailed explanation of selection OR why no database fits"
+}}
+
+If confidence < 0.5 or no good fit, set found_match to false.
+

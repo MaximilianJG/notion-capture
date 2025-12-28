@@ -2,7 +2,7 @@
 //  ScreenshotManager.swift
 //  Notion Capture
 //
-//  Handles background screenshot capture and upload
+//  Handles background screenshot capture and upload with credentials
 //
 
 import Foundation
@@ -16,7 +16,6 @@ class ScreenshotManager {
     
     private init() {}
     
-    // Helper to post status updates
     private func postStatus(_ message: String) {
         DispatchQueue.main.async {
             NotificationCenter.default.post(
@@ -27,17 +26,15 @@ class ScreenshotManager {
         }
     }
     
-    func takeScreenshot() {
+    func takeScreenshot(credentials: CredentialStore? = nil) {
         print("📸 takeScreenshot() called")
         
-        // Notify that screenshot is starting (so window can hide)
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .screenshotStarted, object: nil)
         }
         
         postStatus("Select a region to capture…")
         
-        // Ensure previous screencapture process is fully cleaned up
         if let existingProcess = screenshotProcess {
             if existingProcess.isRunning {
                 print("⚠️ Terminating existing screenshot process")
@@ -47,12 +44,10 @@ class ScreenshotManager {
             screenshotProcess = nil
         }
         
-        // Create a temporary file path for the screenshot
         let tempDir = FileManager.default.temporaryDirectory
         let screenshotURL = tempDir.appendingPathComponent("screenshot_\(UUID().uuidString).png")
         print("📁 Screenshot will be saved to: \(screenshotURL.path)")
         
-        // Use screencapture command with -i flag for interactive selection
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-i", "-x", screenshotURL.path]
@@ -60,10 +55,12 @@ class ScreenshotManager {
         process.standardError = errorPipe
         screenshotProcess = process
         
+        // Capture credentials reference for the closure
+        let creds = credentials ?? CredentialStore.shared
+        
         process.terminationHandler = { [weak self] process in
             print("📸 Screenshot process terminated with status: \(process.terminationStatus)")
             
-            // Read any error output
             let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             if let errorString = String(data: errorData, encoding: .utf8), !errorString.isEmpty {
                 print("⚠️ Screenshot stderr: \(errorString)")
@@ -72,43 +69,36 @@ class ScreenshotManager {
             DispatchQueue.main.async {
                 self?.screenshotProcess = nil
                 
-                // Notify menu bar that screenshot is complete (remove highlight)
                 NotificationCenter.default.post(name: .screenshotCompleted, object: nil)
                 
                 if process.terminationStatus == 0 {
-                    // Screenshot was taken successfully
                     if FileManager.default.fileExists(atPath: screenshotURL.path) {
                         print("✅ Screenshot file exists")
                         if let imageData = try? Data(contentsOf: screenshotURL) {
                             print("✅ Screenshot data loaded: \(imageData.count) bytes")
                             self?.postStatus("Screenshot captured. Analyzing…")
-                            self?.sendScreenshotToBackend(imageData: imageData)
+                            self?.sendScreenshotToBackend(imageData: imageData, credentials: creds)
                         } else {
                             print("❌ Failed to read screenshot data")
                             self?.postStatus("Error: Could not read screenshot file")
                             self?.resetToReady(after: 3)
                         }
                     } else {
-                        // User cancelled - no file was created
                         print("❌ Screenshot file does not exist (user may have cancelled)")
                         self?.postStatus("Screenshot cancelled")
                         self?.resetToReady(after: 2)
                     }
-                    // Clean up temp file
                     try? FileManager.default.removeItem(at: screenshotURL)
                 } else {
                     print("❌ Screenshot cancelled or failed (status: \(process.terminationStatus))")
                     self?.postStatus("Screenshot cancelled")
                     self?.resetToReady(after: 2)
-                    // User cancelled or error occurred
                     try? FileManager.default.removeItem(at: screenshotURL)
                 }
             }
         }
         
         do {
-            // Run screenshot in background - screencapture -i shows system UI
-            // No need to activate app, the screenshot selection UI is system-level
             try process.run()
             print("✅ Screenshot process started")
         } catch {
@@ -125,7 +115,7 @@ class ScreenshotManager {
         }
     }
     
-    private func sendScreenshotToBackend(imageData: Data) {
+    private func sendScreenshotToBackend(imageData: Data, credentials: CredentialStore) {
         print("📤 Sending screenshot to backend...")
         postStatus("Analyzing with AI…")
         
@@ -138,10 +128,19 @@ class ScreenshotManager {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 60 // Give AI processing time
+        request.timeoutInterval = 60
         
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        // Add credentials as headers
+        if credentials.hasNotionCredentials {
+            request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+            request.setValue(credentials.notionSelectedPageId, forHTTPHeaderField: "X-Notion-Page-Id")
+        }
+        if let googleTokensJSON = credentials.googleTokensJSON {
+            request.setValue(googleTokensJSON, forHTTPHeaderField: "X-Google-Tokens")
+        }
         
         var body = Data()
         
@@ -174,7 +173,6 @@ class ScreenshotManager {
                 if httpResponse.statusCode == 200 {
                     print("✅ Screenshot uploaded successfully")
                     
-                    // Parse the response to get detailed info
                     if let data = data {
                         self?.handleSuccessResponse(data: data)
                     } else {
@@ -182,7 +180,6 @@ class ScreenshotManager {
                         self?.resetToReady(after: 2)
                     }
                     
-                    // Notify ContentView to refresh/show popup
                     DispatchQueue.main.async {
                         NotificationCenter.default.post(
                             name: .screenshotUploaded,
@@ -211,7 +208,6 @@ class ScreenshotManager {
                 let title = json["title"] as? String ?? "Untitled"
                 
                 if category == "event" {
-                    // Calendar event
                     let calendarCreated = json["calendar_event_created"] as? Bool ?? false
                     let calendarError = json["calendar_error"] as? String
                     
@@ -227,7 +223,6 @@ class ScreenshotManager {
                         postStatus("Event processing failed")
                     }
                 } else {
-                    // Notion item
                     let notionCreated = json["notion_created"] as? Bool ?? false
                     let notionError = json["notion_error"] as? String
                     

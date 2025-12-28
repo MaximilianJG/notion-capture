@@ -22,8 +22,8 @@ class MenuBarManager {
         
         // Set up the status bar button - clicking opens the app (no menu)
         if let button = statusItem?.button {
-            // Set icon - using camera icon
-            button.image = NSImage(systemSymbolName: "camera.fill", accessibilityDescription: "ScreenSnapAI")
+            // Set icon - using inbox/tray icon
+            button.image = NSImage(systemSymbolName: "tray.fill", accessibilityDescription: "Notion Capture")
             button.image?.isTemplate = true
             
             // Set click action to open the app window

@@ -1,0 +1,111 @@
+Analyze this text input and extract structured information.
+
+CURRENT DATE/TIME (Local Timezone):
+- Now: {datetime_formatted}
+- ISO: {datetime_iso}
+- Timezone: {timezone} ({timezone_offset})
+
+USER INPUT TEXT:
+"{text}"
+
+INSTRUCTIONS:
+Analyze and determine if this is:
+1. A CALENDAR EVENT - Something that happens at a SPECIFIC DATE AND TIME, or implies attendance/presence at a set moment
+2. SOMETHING ELSE - Any other content for Notion
+
+CLASSIFICATION RULES (CRITICAL):
+CALENDAR EVENT requires BOTH:
+- A specific DATE
+- A specific TIME or implied attendance at a moment (flight, meeting, appointment, reservation, call scheduled at X)
+
+Examples of CALENDAR EVENTS:
+- "Meeting with John at 3pm tomorrow" → EVENT (date + time)
+- "Dentist appointment Friday 10am" → EVENT (date + time + attendance)
+- "Team call at 2:30" → EVENT (implies time)
+- "Dinner reservation 7pm Saturday" → EVENT (date + time + attendance)
+
+Examples of TASKS (NOT events):
+- "Buy milk tomorrow" → TASK (has date but no specific time - flexible when to do it)
+- "Call mom" → TASK (no date/time specified)
+- "Respond to email by Friday" → TASK (deadline, not a scheduled moment)
+- "Finish report this week" → TASK (timeframe, not a specific moment)
+- "Pick up dry cleaning tomorrow" → TASK (date but no time - do it anytime that day)
+
+KEY DISTINCTION: 
+- EVENT = You must be somewhere or do something AT a specific moment
+- TASK = Something to complete, flexible when exactly you do it
+
+Provide a DETAILED ANALYSIS explaining what this input represents, its context, and meaning.
+For relative dates ("tomorrow", "next Monday"): Calculate from today's date.
+
+TITLE RULES - Create an actionable, meaningful title:
+
+PRINCIPLE: The title should be what someone would write as a task/item name - clear, actionable, and specific.
+
+DO:
+- Fix typos and grammar (e.g., "respondt o" → "respond to")
+- Use proper capitalization (Title Case)
+- Keep action verbs that describe WHAT to do (respond, call, buy, check, review, etc.)
+- Keep specific details (names, places, subjects)
+- Keep prepositions when they add meaning ("to", "for", "with", "about")
+
+REMOVE:
+- Generic category labels: "task", "note", "reminder", "item", "thing", "todo"
+- Meta-instructions to the app: "add", "save", "track", "log" (when they're just telling the app what to do)
+- Redundant words that don't add meaning
+
+BE SMART:
+- "respond to station f women" → "Respond to Station F Women" (keep the action and specifics)
+- "add milk to shopping list" → "Milk" or "Buy Milk" (remove "add" and "to shopping list" category)
+- "complete stern test" → "Stern Test" (remove "complete" if it's just a meta-action)
+- "watch inception movie" → "Inception" (remove "watch" and "movie" - the title is the entity)
+- "call mom about dinner" → "Call Mom About Dinner" (keep - this is the actual action)
+- "remember to drink water" → "Drink Water" (the action is drinking, not remembering)
+
+RESPOND WITH JSON ONLY:
+
+For EVENTS:
+{{
+    "category": "event",
+    "confidence": 0.0-1.0,
+    "title": "actionable event title",
+    "description": "event description",
+    "detailed_analysis": "In-depth explanation of what this input represents",
+    "start_time": "ISO 8601 local datetime",
+    "end_time": "ISO 8601 local datetime or null",
+    "location": "location or null",
+    "extracted_fields": {{...any other data...}}
+}}
+
+For OTHER:
+{{
+    "category": "other",
+    "confidence": 0.0-1.0,
+    "title": "actionable title",
+    "description": "brief description",
+    "detailed_analysis": "In-depth explanation of what this input represents.",
+    "content": "the input text with grammar fixed",
+    "content_type": "movie|book|task|note|recipe|article|music|contact|other",
+    "do_date": null,
+    "deadline": null,
+    "extracted_fields": {{...any other structured data...}}
+}}
+
+DATE EXTRACTION RULES (CRITICAL):
+
+do_date (when to do it):
+- ONLY set if user specifies WHEN they will do something
+- Trigger words: "tomorrow", "on Monday", "this weekend", "tonight", specific dates
+
+deadline (hard cutoff):
+- ONLY set if user EXPLICITLY uses deadline language
+- REQUIRED trigger words: "by", "due", "deadline", "before", "until", "no later than"
+- If none of these words appear, deadline MUST be null
+
+STRICT RULES:
+1. "tomorrow", "Monday" WITHOUT "by/due" = do_date, NOT deadline
+2. deadline requires EXPLICIT deadline language
+3. If unsure, leave as null
+
+Return ONLY valid JSON.
+

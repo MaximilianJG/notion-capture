@@ -1,0 +1,44 @@
+Analyze which empty database properties could be researched and filled.
+
+USER INPUT:
+"{raw_input}"
+
+CONTENT ANALYSIS:
+- Title: {title}
+- Type: {content_type}
+- Detailed Analysis: {detailed_analysis}
+
+EMPTY PROPERTIES (not yet filled):
+{properties_json}
+
+INSTRUCTIONS:
+For each empty property, determine if it's "researchable" - meaning:
+1. The property asks for factual information that can be looked up
+2. Given the user's input (e.g., a movie title), this information could be researched
+3. Examples: Director, Author, Year, Genre, Rating, Duration, Publisher, etc.
+
+DO NOT mark as researchable:
+- User-specific dates (deadline, do date, scheduled) - these require user input
+- Personal preferences or ratings
+- Subjective notes
+
+RESPOND WITH JSON:
+{{
+    "researchable": [
+        {{
+            "property": "Property Name",
+            "type": "property_type",
+            "options": [...] or null,
+            "reasoning": "why this can be researched"
+        }}
+    ],
+    "not_researchable": [
+        {{
+            "property": "Property Name",
+            "reasoning": "why this cannot be auto-filled"
+        }}
+    ]
+}}
+
+Return ONLY valid JSON.
+

@@ -24,6 +24,10 @@ struct ScreenSnapAIApp: App {
                     configureWindow()
                 }
                 .background(WindowAccessor(window: $window))
+                .onOpenURL { url in
+                    // Handle custom URL scheme callbacks (e.g., from Google OAuth)
+                    handleIncomingURL(url)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -42,6 +46,55 @@ struct ScreenSnapAIApp: App {
             }
         }
     }
+    
+    private func handleIncomingURL(_ url: URL) {
+        print("Received URL: \(url)")
+        
+        guard url.scheme == "notioncapture" else { return }
+        
+        // Handle Google OAuth callback
+        if url.host == "google-callback" {
+            handleGoogleCallback(url)
+        }
+    }
+    
+    private func handleGoogleCallback(_ url: URL) {
+        // Parse tokens from URL query parameters
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            print("Failed to parse callback URL")
+            return
+        }
+        
+        // Extract tokens JSON from query parameter
+        if let tokensParam = queryItems.first(where: { $0.name == "tokens" })?.value,
+           let tokensData = tokensParam.data(using: .utf8),
+           let tokens = try? JSONSerialization.jsonObject(with: tokensData) as? [String: Any] {
+            
+            print("Received Google tokens via URL scheme")
+            
+            // Save tokens to credential store
+            CredentialStore.shared.saveGoogleTokens(tokens)
+            
+            // Post notification for UI update
+            NotificationCenter.default.post(name: .googleTokensReceived, object: tokens)
+            
+            // Bring app to front
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            if let window = NSApplication.shared.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
+        } else if let errorParam = queryItems.first(where: { $0.name == "error" })?.value {
+            print("Google auth error: \(errorParam)")
+            NotificationCenter.default.post(name: .googleAuthError, object: errorParam)
+        }
+    }
+}
+
+// Notification names for Google auth
+extension Notification.Name {
+    static let googleTokensReceived = Notification.Name("googleTokensReceived")
+    static let googleAuthError = Notification.Name("googleAuthError")
 }
 
 // AppDelegate to prevent app from terminating when window is closed
