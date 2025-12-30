@@ -28,7 +28,9 @@ struct ScreenSnapAIApp: App {
                     // Handle custom URL scheme callbacks (e.g., from Google OAuth)
                     handleIncomingURL(url)
                 }
+                .handlesExternalEvents(preferring: Set(["notioncapture"]), allowing: Set(["notioncapture"]))
         }
+        .handlesExternalEvents(matching: Set(["notioncapture", "*"]))
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
@@ -55,6 +57,10 @@ struct ScreenSnapAIApp: App {
         // Handle Google OAuth callback
         if url.host == "google-callback" {
             handleGoogleCallback(url)
+        }
+        // Handle Notion OAuth callback
+        else if url.host == "notion-callback" {
+            handleNotionCallback(url)
         }
     }
     
@@ -89,12 +95,46 @@ struct ScreenSnapAIApp: App {
             NotificationCenter.default.post(name: .googleAuthError, object: errorParam)
         }
     }
+    
+    private func handleNotionCallback(_ url: URL) {
+        // Parse tokens from URL query parameters
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems else {
+            print("Failed to parse Notion callback URL")
+            return
+        }
+        
+        // Extract tokens JSON from query parameter
+        if let tokensParam = queryItems.first(where: { $0.name == "tokens" })?.value,
+           let tokensData = tokensParam.data(using: .utf8),
+           let tokens = try? JSONSerialization.jsonObject(with: tokensData) as? [String: Any] {
+            
+            print("Received Notion tokens via URL scheme")
+            
+            // Save tokens to credential store
+            CredentialStore.shared.saveNotionTokens(tokens)
+            
+            // Post notification for UI update
+            NotificationCenter.default.post(name: .notionTokensReceived, object: tokens)
+            
+            // Bring app to front
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            if let window = NSApplication.shared.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
+        } else if let errorParam = queryItems.first(where: { $0.name == "error" })?.value {
+            print("Notion auth error: \(errorParam)")
+            NotificationCenter.default.post(name: .notionAuthError, object: errorParam)
+        }
+    }
 }
 
-// Notification names for Google auth
+// Notification names for auth
 extension Notification.Name {
     static let googleTokensReceived = Notification.Name("googleTokensReceived")
     static let googleAuthError = Notification.Name("googleAuthError")
+    static let notionTokensReceived = Notification.Name("notionTokensReceived")
+    static let notionAuthError = Notification.Name("notionAuthError")
 }
 
 // AppDelegate to prevent app from terminating when window is closed
@@ -135,6 +175,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false // Keep app running when window is closed
+    }
+    
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // When app is reopened (e.g., clicked in dock), show existing window instead of creating new one
+        if !flag {
+            if let window = NSApplication.shared.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        return true
+    }
+    
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // Handle URL scheme - close any extra windows and focus the main one
+        DispatchQueue.main.async {
+            // Close any duplicate windows (keep only the first one)
+            let windows = NSApplication.shared.windows.filter { $0.isVisible || $0.isMiniaturized }
+            if windows.count > 1 {
+                for window in windows.dropFirst() {
+                    window.close()
+                }
+            }
+            
+            // Focus the main window
+            if let mainWindow = NSApplication.shared.windows.first {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                mainWindow.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 }
 

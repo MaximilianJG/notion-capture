@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     google_client_secret: Optional[str] = None
     google_redirect_uri: str = "http://127.0.0.1:8000/google/auth/callback"
     
+    # Notion OAuth (Public Integration)
+    notion_client_id: Optional[str] = None
+    notion_client_secret: Optional[str] = None
+    notion_redirect_uri: str = "http://localhost:8000/notion/auth/callback"
+    
     # Server
     debug: bool = False
     cors_origins: str = "*"

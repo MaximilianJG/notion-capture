@@ -135,7 +135,9 @@ class ScreenshotManager {
         
         // Add credentials as headers
         if credentials.hasNotionCredentials {
-            request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+            if let tokensJSON = credentials.notionTokensJSON {
+                request.setValue(tokensJSON, forHTTPHeaderField: "X-Notion-Api-Key")
+            }
             request.setValue(credentials.notionSelectedPageId, forHTTPHeaderField: "X-Notion-Page-Id")
         }
         if let googleTokensJSON = credentials.googleTokensJSON {

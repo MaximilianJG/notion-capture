@@ -51,11 +51,13 @@ struct CaptureResult: Identifiable {
 class CredentialStore: ObservableObject {
     static let shared = CredentialStore()
     
-    @Published var notionApiKey: String = ""
+    // Notion OAuth tokens
+    @Published var notionTokens: [String: Any]? = nil
     @Published var notionSelectedPageId: String = ""
+    // Google OAuth tokens
     @Published var googleTokens: [String: Any]? = nil
     
-    private let notionKeyKey = "notion_api_key"
+    private let notionTokensKey = "notion_tokens"
     private let notionPageIdKey = "notion_selected_page_id"
     private let googleTokensKey = "google_tokens"
     
@@ -64,8 +66,12 @@ class CredentialStore: ObservableObject {
     }
     
     func loadCredentials() {
-        notionApiKey = UserDefaults.standard.string(forKey: notionKeyKey) ?? ""
         notionSelectedPageId = UserDefaults.standard.string(forKey: notionPageIdKey) ?? ""
+        
+        if let data = UserDefaults.standard.data(forKey: notionTokensKey),
+           let tokens = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            notionTokens = tokens
+        }
         
         if let data = UserDefaults.standard.data(forKey: googleTokensKey),
            let tokens = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -73,11 +79,12 @@ class CredentialStore: ObservableObject {
         }
     }
     
-    func saveNotionCredentials(apiKey: String, pageId: String = "") {
-        notionApiKey = apiKey
-        notionSelectedPageId = pageId
-        UserDefaults.standard.set(apiKey, forKey: notionKeyKey)
-        UserDefaults.standard.set(pageId, forKey: notionPageIdKey)
+    // Save Notion OAuth tokens
+    func saveNotionTokens(_ tokens: [String: Any]) {
+        notionTokens = tokens
+        if let data = try? JSONSerialization.data(withJSONObject: tokens) {
+            UserDefaults.standard.set(data, forKey: notionTokensKey)
+        }
     }
     
     func saveGoogleTokens(_ tokens: [String: Any]) {
@@ -93,10 +100,10 @@ class CredentialStore: ObservableObject {
     }
     
     func clearNotionCredentials() {
-        notionApiKey = ""
         notionSelectedPageId = ""
-        UserDefaults.standard.removeObject(forKey: notionKeyKey)
+        notionTokens = nil
         UserDefaults.standard.removeObject(forKey: notionPageIdKey)
+        UserDefaults.standard.removeObject(forKey: notionTokensKey)
     }
     
     var googleTokensJSON: String? {
@@ -108,12 +115,29 @@ class CredentialStore: ObservableObject {
         return json
     }
     
+    var notionTokensJSON: String? {
+        guard let tokens = notionTokens,
+              let data = try? JSONSerialization.data(withJSONObject: tokens),
+              let json = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return json
+    }
+    
+    var notionAccessToken: String? {
+        notionTokens?["access_token"] as? String
+    }
+    
     var hasNotionCredentials: Bool {
-        !notionApiKey.isEmpty
+        notionAccessToken != nil
     }
     
     var hasGoogleCredentials: Bool {
         googleTokens != nil && (googleTokens?["access_token"] as? String) != nil
+    }
+    
+    var notionWorkspaceName: String? {
+        notionTokens?["workspace_name"] as? String
     }
 }
 
@@ -136,9 +160,8 @@ struct ContentView: View {
     @State private var isProcessingText: Bool = false
     @State private var isHoveringSendText: Bool = false
     
-    // Notion API key input
-    @State private var notionApiKeyInput: String = ""
-    @State private var showNotionSetup: Bool = false
+    // Notion OAuth
+    @State private var isPollingNotionStatus: Bool = false
     
     // Recent captures (in-memory only)
     @State private var recentCaptures: [CaptureResult] = []
@@ -150,7 +173,7 @@ struct ContentView: View {
     @State private var showDatabasesDropdown: Bool = false
     
     // Backend URL
-    private let backendURL = "http://127.0.0.1:8000"
+    private let backendURL = "http://localhost:8000"
 
     var body: some View {
         ZStack {
@@ -176,7 +199,6 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            notionApiKeyInput = credentials.notionApiKey
             checkGoogleStatus()
             checkNotionStatus()
             
@@ -258,6 +280,29 @@ struct ContentView: View {
                 self.isPollingGoogleStatus = false
                 if let error = notification.object as? String {
                     self.statusMessage = "Google auth error: \(error)"
+                }
+            }
+            
+            // Listen for Notion tokens received via URL scheme
+            NotificationCenter.default.addObserver(
+                forName: .notionTokensReceived,
+                object: nil,
+                queue: .main
+            ) { notification in
+                self.isPollingNotionStatus = false
+                self.statusMessage = "Notion connected!"
+                self.checkNotionStatus()
+            }
+            
+            // Listen for Notion auth errors
+            NotificationCenter.default.addObserver(
+                forName: .notionAuthError,
+                object: nil,
+                queue: .main
+            ) { notification in
+                self.isPollingNotionStatus = false
+                if let error = notification.object as? String {
+                    self.statusMessage = "Notion auth error: \(error)"
                 }
             }
         }
@@ -701,14 +746,20 @@ extension ContentView {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
-                            Text("Connected")
-                                .foregroundColor(.primary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Connected")
+                                    .foregroundColor(.primary)
+                                if let workspace = notionWorkspace ?? credentials.notionWorkspaceName {
+                                    Text(workspace)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
                             Spacer()
                             Button("Disconnect") {
                                 credentials.clearNotionCredentials()
                                 notionConnected = false
                                 notionWorkspace = nil
-                                notionApiKeyInput = ""
                                 showDatabasesDropdown = false
                             }
                             .buttonStyle(.bordered)
@@ -765,29 +816,10 @@ extension ContentView {
                             }
                         }
                     } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Enter your Notion Internal Integration API Key:")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            HStack {
-                                SecureField("secret_xxx...", text: $notionApiKeyInput)
-                                    .textFieldStyle(.roundedBorder)
-                                
-                                Button("Connect") {
-                                    saveNotionApiKey()
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(notionApiKeyInput.isEmpty)
-                            }
-                            
-                            Text("Get your API key from notion.so/my-integrations")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                        Button("Connect to Notion") {
+                            connectNotion()
                         }
-                        .padding(12)
-                        .background(Color.orange.opacity(0.1))
-                        .cornerRadius(8)
+                        .buttonStyle(.borderedProminent)
                     }
                     
                     Text("Non-event captures will be saved to Notion databases")
@@ -835,11 +867,6 @@ extension ContentView {
     
     // MARK: - API Functions
     
-    private func saveNotionApiKey() {
-        credentials.saveNotionCredentials(apiKey: notionApiKeyInput)
-        checkNotionStatus()
-    }
-    
     private func checkGoogleStatus(continuePolling: Bool = false) {
         guard credentials.hasGoogleCredentials else {
             googleConnected = false
@@ -881,16 +908,14 @@ extension ContentView {
     }
     
     private func checkNotionStatus() {
-        guard credentials.hasNotionCredentials else {
-            notionConnected = false
-            notionWorkspace = nil
-            return
+        // First check if OAuth is configured (even if not connected)
+        guard let statusUrl = URL(string: "\(backendURL)/notion/auth/status") else { return }
+        
+        var request = URLRequest(url: statusUrl)
+        // Send Notion OAuth tokens
+        if let tokensJSON = credentials.notionTokensJSON {
+            request.setValue(tokensJSON, forHTTPHeaderField: "X-Notion-Api-Key")
         }
-        
-        guard let url = URL(string: "\(backendURL)/notion/auth/status") else { return }
-        
-        var request = URLRequest(url: url)
-        request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
@@ -901,6 +926,42 @@ extension ContentView {
                     
                     if self.notionConnected {
                         self.fetchNotionDatabases()
+                    }
+                }
+            }
+        }.resume()
+    }
+    
+    private func connectNotion() {
+        statusMessage = "Connecting to Notion…"
+        
+        guard let url = URL(string: "\(backendURL)/notion/auth/url") else {
+            statusMessage = "Bad URL"
+            return
+        }
+        
+        URLSession.shared.dataTask(with: URLRequest(url: url)) { data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self.statusMessage = "Error: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let authUrlString = json["auth_url"] as? String,
+                      let authUrl = URL(string: authUrlString) else {
+                    self.statusMessage = "Error: Invalid response"
+                    return
+                }
+                
+                if NSWorkspace.shared.open(authUrl) {
+                    self.statusMessage = "Complete authentication in browser…"
+                    self.isPollingNotionStatus = true
+                    
+                    // Timeout after 2 minutes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+                        self.isPollingNotionStatus = false
                     }
                 }
             }
@@ -963,7 +1024,10 @@ extension ContentView {
         guard let url = URL(string: "\(backendURL)/notion/databases") else { return }
         
         var request = URLRequest(url: url)
-        request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+        // Send Notion OAuth tokens
+        if let tokensJSON = credentials.notionTokensJSON {
+            request.setValue(tokensJSON, forHTTPHeaderField: "X-Notion-Api-Key")
+        }
         
         URLSession.shared.dataTask(with: request) { data, _, _ in
             DispatchQueue.main.async {
@@ -997,7 +1061,9 @@ extension ContentView {
         
         // Add credentials to headers
         if credentials.hasNotionCredentials {
-            request.setValue(credentials.notionApiKey, forHTTPHeaderField: "X-Notion-Api-Key")
+            if let tokensJSON = credentials.notionTokensJSON {
+                request.setValue(tokensJSON, forHTTPHeaderField: "X-Notion-Api-Key")
+            }
             request.setValue(credentials.notionSelectedPageId, forHTTPHeaderField: "X-Notion-Page-Id")
         }
         if let googleTokensJSON = credentials.googleTokensJSON {

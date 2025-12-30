@@ -1,34 +1,100 @@
 # Notion Integration Setup Guide
 
-This guide explains how to set up Notion for the Notion Capture app using an **Internal Integration** (simple API token).
+This guide explains how to set up Notion for the Notion Capture app. You can use either:
+- **Public Integration (OAuth)** - Recommended for distribution. Users click "Connect to Notion" and authorize.
+- **Internal Integration (API Key)** - Simpler for personal use. Users paste their API key.
 
-## Quick Setup (5 minutes)
+---
 
-### 1. Create a Notion Integration
+## Option 1: Public Integration (OAuth) - Recommended
+
+This allows each user to connect their own Notion workspace with a single click.
+
+### Step 1: Create a Public Integration on Notion
 
 1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations)
 2. Click **"+ New integration"**
 3. Fill in:
-   - **Name**: "Notion Capture" (or any name you like)
+   - **Name**: "Notion Capture" (or your app name)
+   - **Associated workspace**: Select any workspace (users will authorize their own)
+   - **Type**: Select **"Public"** ⚠️ Important!
+4. Click **"Submit"**
+
+### Step 2: Configure OAuth Settings
+
+After creating the integration:
+
+1. Go to the **"Distribution"** tab
+2. Fill in your company/developer information
+3. Under **"OAuth Domain & URIs"**:
+   - **Redirect URIs**: Add `http://127.0.0.1:8000/notion/auth/callback`
+   - For production, also add your production callback URL (must be HTTPS)
+4. **Website**: Add your app's website URL
+5. Click **"Submit"** to save
+
+### Step 3: Get Your OAuth Credentials
+
+1. Go to the **"Secrets"** tab
+2. Copy:
+   - **OAuth client ID** (looks like: `abc123-def456-...`)
+   - **OAuth client secret** (click "Show" then copy)
+
+### Step 4: Add to Environment
+
+Add these to your `.env` file in the `backend/` directory:
+
+```bash
+NOTION_CLIENT_ID=your_oauth_client_id_here
+NOTION_CLIENT_SECRET=your_oauth_client_secret_here
+NOTION_REDIRECT_URI=http://127.0.0.1:8000/notion/auth/callback
+```
+
+### Step 5: Restart the Backend
+
+```bash
+# Stop the server (Ctrl+C) and restart
+uvicorn app.main:app --reload
+```
+
+### How OAuth Works
+
+1. User clicks **"Connect to Notion"** in the app
+2. Browser opens Notion's authorization page
+3. User selects a workspace and grants access
+4. Notion redirects back to your app with an access token
+5. The app stores the token and can now access that user's Notion
+
+### What Users See
+
+When connecting:
+1. Notion asks which workspace to connect
+2. Notion shows which pages/databases the app can access
+3. User clicks "Select pages" and grants access
+4. User is redirected back to the app
+
+---
+
+## Option 2: Internal Integration (API Key) - For Personal Use
+
+This is simpler but requires users to manually copy their API key.
+
+### Step 1: Create an Internal Integration
+
+1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations)
+2. Click **"+ New integration"**
+3. Fill in:
+   - **Name**: "Notion Capture" (or any name)
    - **Associated workspace**: Select your workspace
    - **Type**: Keep as **"Internal"** (default)
 4. Click **"Submit"**
 
-### 2. Copy the API Token
+### Step 2: Copy the API Token
 
 1. After creating, you'll see the **"Internal Integration Secret"**
 2. Click **"Show"** then **"Copy"**
 3. It looks like: `secret_abc123xyz...`
 
-### 3. Add to Environment
-
-Add this line to your `.env` file in the `backend/` directory:
-
-```bash
-NOTION_API_KEY=secret_your_token_here
-```
-
-### 4. Share Pages with the Integration
+### Step 3: Share Pages with the Integration
 
 **Important:** Your integration can only access pages you explicitly share with it.
 
@@ -40,21 +106,21 @@ NOTION_API_KEY=secret_your_token_here
 
 Repeat for any pages/databases you want the app to access.
 
-### 5. Restart the Backend
+### Step 4: Enter API Key in the App
 
-```bash
-# Stop the server (Ctrl+C) and restart
-uvicorn main:app --reload
-```
+1. Open Notion Capture
+2. Go to **Configure** tab
+3. Paste your API key in the Notion section
+4. Click **Connect**
 
-The app should now show "Notion connected" in the Configure tab!
+---
 
-## How It Works
+## How the Integration Works
 
 ### Database Discovery
-When connected, the app searches for all databases you've shared with the integration and caches them for quick access.
+When connected, the app searches for all databases you've shared with the integration.
 
-### Automatic Database Selection  
+### Automatic Database Selection
 When you capture something (screenshot or text), AI analyzes the content and selects the most appropriate database based on:
 - Database name matching (e.g., "Movies" database for movie captures)
 - Property name matching
@@ -72,44 +138,59 @@ For empty "researchable" properties (like director, author, genre), AI can fill 
 - Movie title → Director, Year, Genre
 - Book title → Author, Publisher
 
-### Log Database
-If you have a database with "log" in its name, the app automatically writes activity logs there.
+---
 
 ## Troubleshooting
 
-### "Notion not connected (NOTION_API_KEY not set)"
-Make sure `NOTION_API_KEY` is set in your `.env` file and restart the backend.
+### "Notion OAuth not configured"
+Add `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` to your `.env` file and restart the backend.
 
-### "Invalid API key"
-Double-check that you copied the full token (starts with `secret_`).
+### "Notion not connected"
+- For OAuth: Click "Connect to Notion" and complete the authorization
+- For API Key: Enter a valid API key starting with `secret_`
 
 ### "No databases found"
-You need to share pages with your integration:
+For Internal Integrations: Share pages with your integration:
 1. Go to the Notion page with your databases
 2. Click "..." → "Connections" → Add your integration
+
+For Public Integrations: Users must select pages to share during the OAuth flow.
 
 ### "Failed to create page"
 Check that:
 1. The database has been shared with the integration
 2. The database has a title/name property
-3. Your integration has "Insert content" capability (enabled by default)
+3. Your integration has "Insert content" capability
 
-## Capabilities
+### "Token expired or invalid"
+Reconnect to Notion to get a fresh access token.
 
-Your integration needs these capabilities (all enabled by default):
+---
+
+## Capabilities Required
+
+Your integration needs these capabilities:
 - ✅ Read content
-- ✅ Update content
+- ✅ Update content  
 - ✅ Insert content
 
-You can verify/modify these at [notion.so/my-integrations](https://www.notion.so/my-integrations) → Select your integration → "Capabilities"
+For Public Integrations, these are configured in the integration settings.
+For Internal Integrations, verify at [notion.so/my-integrations](https://www.notion.so/my-integrations) → Select your integration → "Capabilities"
 
-## Migrating to Public Integration (OAuth)
+---
 
-If you later want to distribute this app to other users, you can add OAuth:
+## Production Deployment
 
-1. Change integration type to "Public" in Notion
-2. Set up OAuth redirect URIs (requires HTTPS)
-3. Add OAuth endpoints to the backend
-4. The API calls remain exactly the same - only the token source changes
+For production deployment with OAuth:
 
-For personal use, the Internal Integration is simpler and works great!
+1. Use HTTPS for your redirect URI (Notion requires HTTPS for production)
+2. Update `NOTION_REDIRECT_URI` in your `.env` to your production URL
+3. Add the production redirect URI in your Notion integration settings
+4. Submit your integration for review if you want it listed publicly
+
+Example production `.env`:
+```bash
+NOTION_CLIENT_ID=your_oauth_client_id
+NOTION_CLIENT_SECRET=your_oauth_client_secret
+NOTION_REDIRECT_URI=https://yourapp.com/notion/auth/callback
+```
