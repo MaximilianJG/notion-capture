@@ -1,6 +1,0 @@
-# Nixpacks configuration for Railway
-# Installs tesseract for OCR
-
-[phases.setup]
-nixPkgs = ["tesseract"]
-
