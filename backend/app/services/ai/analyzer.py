@@ -6,14 +6,23 @@ import base64
 import json
 from typing import Dict, Any, Tuple
 from PIL import Image
-import pytesseract
+
+# pytesseract is optional - requires tesseract-ocr system package
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+    print("⚠️ pytesseract not available - OCR disabled (GPT-4 Vision will be used instead)")
 
 from app.core import get_openai_client, get_local_datetime_context, log_ai_prompt, log_ai_response
 from app.services.ai.prompts.loader import render_prompt
 
 
 def extract_text_ocr(image_data: bytes) -> str:
-    """Extract text from image using OCR"""
+    """Extract text from image using OCR (if available)"""
+    if not TESSERACT_AVAILABLE:
+        return ""  # Skip OCR, GPT-4 Vision will handle text extraction
     try:
         image = Image.open(io.BytesIO(image_data))
         text = pytesseract.image_to_string(image)
