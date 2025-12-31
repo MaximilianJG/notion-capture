@@ -172,8 +172,12 @@ struct ContentView: View {
     @State private var notionDatabases: [[String: Any]] = []
     @State private var showDatabasesDropdown: Bool = false
     
-    // Backend URL
+    // Backend URL - localhost for development, Railway for production
+    #if DEBUG
     private let backendURL = "http://localhost:8000"
+    #else
+    private let backendURL = "https://notion-capture-production.up.railway.app"
+    #endif
 
     var body: some View {
         ZStack {

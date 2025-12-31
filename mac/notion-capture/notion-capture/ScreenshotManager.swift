@@ -12,7 +12,13 @@ class ScreenshotManager {
     static let shared = ScreenshotManager()
     
     private var screenshotProcess: Process?
+    
+    // Backend URL - localhost for development, Railway for production
+    #if DEBUG
     private let backendURL = "http://localhost:8000"
+    #else
+    private let backendURL = "https://notion-capture-production.up.railway.app"
+    #endif
     
     private init() {}
     
