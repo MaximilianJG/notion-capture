@@ -31,6 +31,19 @@ def _parse_google_tokens(tokens_str: Optional[str]) -> Optional[dict]:
         return None
 
 
+def _extract_notion_token(token_str: Optional[str]) -> Optional[str]:
+    """Extract Notion access token from header - supports both raw token and JSON format"""
+    if not token_str:
+        return None
+    # Try to parse as JSON (OAuth tokens stored as JSON)
+    try:
+        data = json.loads(token_str)
+        return data.get("access_token")
+    except (json.JSONDecodeError, TypeError):
+        # Raw API key or token
+        return token_str
+
+
 @router.post("/process-text")
 async def process_text_endpoint(
     input_data: TextInput,
@@ -58,7 +71,8 @@ async def process_text_endpoint(
             )
         
         # Get credentials from body or headers
-        notion_api_key = input_data.notion_api_key or x_notion_api_key
+        raw_notion_key = input_data.notion_api_key or x_notion_api_key
+        notion_api_key = _extract_notion_token(raw_notion_key)
         notion_page_id = input_data.notion_selected_page_id or x_notion_page_id
         google_tokens = _parse_google_tokens(input_data.google_tokens) or _parse_google_tokens(x_google_tokens)
         
@@ -127,7 +141,8 @@ async def upload_screenshot_endpoint(
         image_size = len(image_data)
         
         # Get credentials from form or headers
-        notion_key = notion_api_key or x_notion_api_key
+        raw_notion_key = notion_api_key or x_notion_api_key
+        notion_key = _extract_notion_token(raw_notion_key)
         notion_page = notion_selected_page_id or x_notion_page_id
         g_tokens = _parse_google_tokens(google_tokens) or _parse_google_tokens(x_google_tokens)
         
