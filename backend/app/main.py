@@ -15,7 +15,9 @@ import ssl
 import warnings
 
 # Only apply SSL workarounds in development (not production)
-IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("PRODUCTION")
+# Railway sets RAILWAY_ENVIRONMENT_NAME, not RAILWAY_ENVIRONMENT
+IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("PRODUCTION")
+print(f"🔍 Environment: IS_PRODUCTION={IS_PRODUCTION}", flush=True)
 
 if not IS_PRODUCTION:
     # Fix SSL certificate issues on macOS - disable verification for development
