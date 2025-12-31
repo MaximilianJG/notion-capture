@@ -747,8 +747,8 @@ extension ContentView {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Connected")
-                                    .foregroundColor(.primary)
+                            Text("Connected")
+                                .foregroundColor(.primary)
                                 if let workspace = notionWorkspace ?? credentials.notionWorkspaceName {
                                     Text(workspace)
                                         .font(.caption)
@@ -818,8 +818,8 @@ extension ContentView {
                     } else {
                         Button("Connect to Notion") {
                             connectNotion()
-                        }
-                        .buttonStyle(.borderedProminent)
+                                }
+                                .buttonStyle(.borderedProminent)
                     }
                     
                     Text("Non-event captures will be saved to Notion databases")

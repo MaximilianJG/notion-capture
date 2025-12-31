@@ -120,7 +120,7 @@ Repeat for any pages/databases you want the app to access.
 ### Database Discovery
 When connected, the app searches for all databases you've shared with the integration.
 
-### Automatic Database Selection
+### Automatic Database Selection  
 When you capture something (screenshot or text), AI analyzes the content and selects the most appropriate database based on:
 - Database name matching (e.g., "Movies" database for movie captures)
 - Property name matching
@@ -171,7 +171,7 @@ Reconnect to Notion to get a fresh access token.
 
 Your integration needs these capabilities:
 - ✅ Read content
-- ✅ Update content  
+- ✅ Update content
 - ✅ Insert content
 
 For Public Integrations, these are configured in the integration settings.

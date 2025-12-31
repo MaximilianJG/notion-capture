@@ -102,8 +102,8 @@ struct ScreenSnapAIApp: App {
               let queryItems = components.queryItems else {
             print("Failed to parse Notion callback URL")
             return
-        }
-        
+}
+
         // Extract tokens JSON from query parameter
         if let tokensParam = queryItems.first(where: { $0.name == "tokens" })?.value,
            let tokensData = tokensParam.data(using: .utf8),
