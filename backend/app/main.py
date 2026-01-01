@@ -14,12 +14,8 @@ import os
 import ssl
 import warnings
 
-# Only apply SSL workarounds in development (not production)
-# Railway sets RAILWAY_ENVIRONMENT_NAME, not RAILWAY_ENVIRONMENT
-IS_PRODUCTION = os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("PRODUCTION")
-print(f"🔍 Environment: IS_PRODUCTION={IS_PRODUCTION}", flush=True)
-
-if not IS_PRODUCTION:
+# Only apply SSL hacks in development (not on Railway/production)
+if os.getenv("RAILWAY_ENVIRONMENT") is None:
     # Fix SSL certificate issues on macOS - disable verification for development
     ssl._create_default_https_context = ssl._create_unverified_context
     os.environ['PYTHONHTTPSVERIFY'] = '0'
@@ -28,6 +24,14 @@ if not IS_PRODUCTION:
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+    # Also try certifi if available
+    try:
+        import certifi
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+    except ImportError:
+        pass
 
     # Monkey-patch httpx to disable SSL verification (for development)
     import httpx
@@ -42,14 +46,6 @@ if not IS_PRODUCTION:
         kwargs['verify'] = False
         _original_async_client_init(self, *args, **kwargs)
     httpx.AsyncClient.__init__ = _patched_async_client_init
-
-# Use certifi for proper SSL certs in production
-try:
-    import certifi
-    os.environ['SSL_CERT_FILE'] = certifi.where()
-    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-except ImportError:
-    pass
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +79,16 @@ app.add_middleware(
 
 # Include all routes
 app.include_router(api_router)
+
+
+# Root endpoint for health checks
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "Notion Capture API",
+        "version": "4.0.0"
+    }
 
 
 @app.on_event("startup")
