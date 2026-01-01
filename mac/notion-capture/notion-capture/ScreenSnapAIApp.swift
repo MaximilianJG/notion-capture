@@ -34,8 +34,13 @@ struct ScreenSnapAIApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
         .commands {
-            // Remove default "Quit" from menu since we handle it in menu bar
-            CommandGroup(replacing: .appTermination) {}
+            // Keep the standard Quit command (Command-Q)
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit Notion Capture") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
         }
     }
     
@@ -140,8 +145,14 @@ extension Notification.Name {
 // AppDelegate to prevent app from terminating when window is closed
 class AppDelegate: NSObject, NSApplicationDelegate {
     private let menuBarManager = MenuBarManager()
+    private weak var mainWindow: NSWindow?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Store reference to the main window
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.mainWindow = NSApplication.shared.windows.first(where: { $0.contentView != nil })
+        }
+        
         // Setup menu bar and keyboard shortcuts on app launch
         // This ensures they work even when the window is closed
         menuBarManager.setup(
@@ -149,17 +160,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenshotManager.shared.takeScreenshot()
             },
             toggleWindowAction: { [weak self] in
-                if let window = NSApplication.shared.windows.first {
-                    if window.isVisible && NSApplication.shared.isActive {
-                        // Window is visible and app is active - hide it
-                        window.orderOut(nil)
-                    } else {
-                        // Window is hidden or app is not active - show it
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-                        self?.menuBarManager.positionWindowBelowMenuBar(window)
-                        window.makeKeyAndOrderFront(nil)
-                    }
+                // Find the main content window (not alert panels, etc.)
+                let window = self?.mainWindow ?? NSApplication.shared.windows.first(where: { $0.contentView != nil })
+                
+                guard let window = window else { return }
+                
+                if window.isVisible && window.isKeyWindow && NSApplication.shared.isActive {
+                    // Window is visible, key, and app is active - hide it
+                    window.orderOut(nil)
+                } else {
+                    // Window is hidden or app is not active - show it
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+                    self?.menuBarManager.positionWindowBelowMenuBar(window)
+                    window.makeKeyAndOrderFront(nil)
                 }
             },
             quitAction: {
